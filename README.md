@@ -189,12 +189,132 @@ __STATIC_INLINE uint32_t NVIC_EncodePriority (uint32_t PriorityGroup, uint32_t P
 NVIC_EncodePriority函数返回15,设置系统定时中断优先级为15
 之后uwTickPrio = TickPriority; 把时钟优先级传给uwTickPrio
 HAL_MspInit函数的函数体内容是根据用户需求来动态修改的，会根据任务的不同拥有不同的函数体，当然你也可以添加你自己的需求代码。但要注意这个函数调用的时机是在main函数的最开始，由HAL_Init来调用的。不需要手动调用。之后你会看到好多类似的Init函数都不用自己来调用。
-
+系统时钟初始化
 sys_stm32_clock_init(RCC_PLL_MUL9); /* 设置时钟, 72Mhz */
 
+void sys_stm32_clock_init(uint32_t plln)
+{
+    HAL_StatusTypeDef ret = HAL_ERROR;  //定义HAL_StatusTypeDef类型的枚举变量ret = HAL_ERROR 这个是枚举变量
+    RCC_OscInitTypeDef rcc_osc_init = {0};  //枚举结构体，全部初始化为0
+    RCC_ClkInitTypeDef rcc_clk_init = {0};  //枚举结构体，全部初始化为0
+
+    rcc_osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;       /* 选择要配置HSE */
+    rcc_osc_init.HSEState = RCC_HSE_ON;                         /* 打开HSE */
+    rcc_osc_init.HSEPredivValue = RCC_HSE_PREDIV_DIV1;          /* HSE预分频系数 */
+    rcc_osc_init.PLL.PLLState = RCC_PLL_ON;                     /* 打开PLL */
+    rcc_osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;             /* PLL时钟源选择HSE */
+    rcc_osc_init.PLL.PLLMUL = plln;                             /* PLL倍频系数 */
+    ret = HAL_RCC_OscConfig(&rcc_osc_init);                     /* 初始化 */
+
+    if (ret != HAL_OK)
+    {
+        while (1);                                              /* 时钟初始化失败，之后的程序将可能无法正常执行，可以在这里加入自己的处理 */
+    }
+
+    /* 选中PLL作为系统时钟源并且配置HCLK,PCLK1和PCLK2*/
+    rcc_clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2);
+    rcc_clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;        /* 设置系统时钟来自PLL */
+    rcc_clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;               /* AHB分频系数为1 */
+    rcc_clk_init.APB1CLKDivider = RCC_HCLK_DIV2;                /* APB1分频系数为2 */
+    rcc_clk_init.APB2CLKDivider = RCC_HCLK_DIV1;                /* APB2分频系数为1 */
+    ret = HAL_RCC_ClockConfig(&rcc_clk_init, FLASH_LATENCY_2);  /* 同时设置FLASH延时周期为2WS，也就是3个CPU周期。 */
+
+    if (ret != HAL_OK)
+    {
+        while (1);                                              /* 时钟初始化失败，之后的程序将可能无法正常执行，可以在这里加入自己的处理 */
+    }
+}
+上电后时钟为HSI，要切换为HSE+PLL(8M->72M),HAL_RCC_OscConfig(&rcc_osc_init)初始化芯片各类时钟源
+首先是HSE
+HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
+{
+  uint32_t tickstart;
+  uint32_t pll_config;
+
+  /* Check Null pointer */
+  if (RCC_OscInitStruct == NULL)
+  {
+    return HAL_ERROR;
+  }
+
+  /* Check the parameters */
+  assert_param(IS_RCC_OSCILLATORTYPE(RCC_OscInitStruct->OscillatorType));
+
+  /*------------------------------- HSE Configuration ------------------------*/
+  if (((RCC_OscInitStruct->OscillatorType) & RCC_OSCILLATORTYPE_HSE) == RCC_OSCILLATORTYPE_HSE)
+  {
+    /* Check the parameters */
+    assert_param(IS_RCC_HSE(RCC_OscInitStruct->HSEState));
+
+    /* When the HSE is used as system clock or clock source for PLL in these cases it is not allowed to be disabled */
+    if ((__HAL_RCC_GET_SYSCLK_SOURCE() == RCC_SYSCLKSOURCE_STATUS_HSE)  //#define __HAL_RCC_GET_SYSCLK_SOURCE() ((uint32_t)(READ_BIT(RCC->CFGR 数值为0,RCC_CFGR_SWS 数值为0x0000000C)))    #define READ_BIT(REG, BIT)    ((REG) & (BIT))   
+        || ((__HAL_RCC_GET_SYSCLK_SOURCE() == RCC_SYSCLKSOURCE_STATUS_PLLCLK) && (__HAL_RCC_GET_PLL_OSCSOURCE() == RCC_PLLSOURCE_HSE)))  都不满足则进入else
+    {
+      if ((__HAL_RCC_GET_FLAG(RCC_FLAG_HSERDY) != RESET) && (RCC_OscInitStruct->HSEState == RCC_HSE_OFF))
+      {
+        return HAL_ERROR;
+      }
+    }
+    else
+    {
+      /* Set the new HSE configuration ---------------------------------------*/
+      __HAL_RCC_HSE_CONFIG(RCC_OscInitStruct->HSEState);  
 
 
+      /* Check the HSE State */
+      if (RCC_OscInitStruct->HSEState != RCC_HSE_OFF)
+      {
+        /* Get Start Tick */
+        tickstart = HAL_GetTick();
 
+        /* Wait till HSE is ready */
+        while (__HAL_RCC_GET_FLAG(RCC_FLAG_HSERDY) == RESET)
+        {
+          if ((HAL_GetTick() - tickstart) > HSE_TIMEOUT_VALUE)
+          {
+            return HAL_TIMEOUT;
+          }
+        }
+      }
+      else
+      {
+        /* Get Start Tick */
+        tickstart = HAL_GetTick();
+
+        /* Wait till HSE is disabled */
+        while (__HAL_RCC_GET_FLAG(RCC_FLAG_HSERDY) != RESET)
+        {
+          if ((HAL_GetTick() - tickstart) > HSE_TIMEOUT_VALUE)
+          {
+            return HAL_TIMEOUT;
+          }
+        }
+      }
+    }
+  }
+
+#define __HAL_RCC_HSE_CONFIG(__STATE__)                                     \
+                    do{                                                     \
+                      if ((__STATE__) == RCC_HSE_ON)   满足则#define SET_BIT(REG, BIT)     ((REG) |= (BIT))                      \
+                      {                                                     \
+                        SET_BIT(RCC->CR, RCC_CR_HSEON);                     \
+                      }                                                     \
+                      else if ((__STATE__) == RCC_HSE_OFF)                  \
+                      {                                                     \
+                        CLEAR_BIT(RCC->CR, RCC_CR_HSEON);                   \
+                        CLEAR_BIT(RCC->CR, RCC_CR_HSEBYP);                  \
+                      }                                                     \
+                      else if ((__STATE__) == RCC_HSE_BYPASS)               \
+                      {                                                     \
+                        SET_BIT(RCC->CR, RCC_CR_HSEBYP);                    \
+                        SET_BIT(RCC->CR, RCC_CR_HSEON);                     \
+                      }                                                     \
+                      else                                                  \
+                      {                                                     \
+                        CLEAR_BIT(RCC->CR, RCC_CR_HSEON);                   \
+                        CLEAR_BIT(RCC->CR, RCC_CR_HSEBYP);                  \
+                      }                                                     \
+                    }while(0U)
 
 
 
