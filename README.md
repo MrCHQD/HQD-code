@@ -1,4 +1,4 @@
-<img width="803" height="527" alt="image" src="https://github.com/user-attachments/assets/daa4cefe-5099-4d5f-9202-26121dd8cb8d" /><img width="692" height="478" alt="image" src="https://github.com/user-attachments/assets/a1c801fd-ad80-4483-9057-6c7e007da38a" />首先是 __HAL_FLASH_PREFETCH_BUFFER_ENABLE();设置FLASH->ACR寄存器，位4为1，启用预取缓冲区PRFTBE
+<img width="803" height="527" alt="image" src="https://github.com/user-attachments/assets/daa4cefe-5099-4d5f-9202-26121dd8cb8d" />首先是 __HAL_FLASH_PREFETCH_BUFFER_ENABLE();设置FLASH->ACR寄存器，位4为1，启用预取缓冲区PRFTBE
 FLASH->ACR |= FLASH_ACR_PRFTBE（0x1<<4）
 其次设置NVIC中断
 void HAL_NVIC_SetPriorityGrouping(uint32_t PriorityGroup)
