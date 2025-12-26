@@ -1,1 +1,17 @@
-
+__HAL_RCC_GPIOB_CLK_ENABLE();
+#define __HAL_RCC_GPIOB_CLK_ENABLE()   do { \
+                                        __IO uint32_t tmpreg; \
+                                        SET_BIT(RCC->APB2ENR, RCC_APB2ENR_IOPBEN);\
+                                        /* Delay after an RCC peripheral clock enabling */\
+                                        tmpreg = READ_BIT(RCC->APB2ENR, RCC_APB2ENR_IOPBEN);\
+                                        UNUSED(tmpreg); \
+                                      } while(0U)
+首先要加反斜杠，如果不加，编译器会把#define后的第一个换行符当做宏结束标志；其次，反斜杠作为「行续符」，突破宏定义 “逻辑单行” 的语法限制，把多行代码拼接成一个完整的宏。
+\ 必须是一行的最后一个字符：如果 \ 后面有空格、制表符或注释，编译器会识别失败，触发语法错误；注释不能跟在 \ 后：比如 SET_BIT(...);\ // 开启时钟 是错误的（注释会打断行续符），注释要单独占一行；仅宏定义需要：普通代码行不需要加 \，只有宏内容跨多行时才用。
+__IO=volatile禁止编译器优化
+tmpreg = READ_BIT(RCC->APB2ENR, RCC_APB2ENR_IOPBEN);这是最核心的 “多余但必要” 的一行，新手最容易忽略 ——STM32 的硬件特性要求：对 RCC 寄存器（时钟控制寄存器）执行写操作后，需要读一次该寄存器，以等待 “时钟使能的硬件同步完成”。
+硬件层面原因：
+STM32 的 RCC 模块是独立的硬件单元，写寄存器的指令会进入 “硬件写缓冲”，不是立即生效；读寄存器的操作会 “排空写缓冲”，强制 CPU 等待写操作真正完成 —— 确保 GPIOB 时钟完全稳定后，再进行后续的 GPIO 操作（比如配置引脚模式）。
+如果省略这行：
+可能出现 “代码执行到配置 GPIO 时，GPIOB 时钟还没生效”，导致 GPIO 配置失败（比如引脚无输出、读不到输入），尤其是在高频系统时钟下（如 72MHz），这种时序问题更容易触发。
+UNUSED(tmpreg);tmpreg只赋值、未使用，编译器会报 “unused variable”（未使用变量）警告；UNUSED宏是 HAL 库的 “语法糖”,告诉编译器 “这个变量是故意不用的，别警告”，保证代码编译无警告，符合工业级代码规范。
