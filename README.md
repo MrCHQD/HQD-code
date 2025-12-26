@@ -28,7 +28,7 @@ HAL_StatusTypeDef HAL_Init(void)
                                                       0 bits for subpriority */
 
   /* Use systick as time base source and configure 1ms tick (default clock after Reset is HSI) */
-  HAL_InitTick(TICK_INT_PRIORITY);
+  HAL_InitTick(TICK_INT_PRIORITY);  //TICK_INT_PRIORITY = 0x0000000F
 
   /* Init the low level hardware */
   HAL_MspInit();
@@ -84,7 +84,7 @@ __weak HAL_StatusTypeDef HAL_InitTick(uint32_t TickPriority)
   /* Configure the SysTick IRQ priority */
   if (TickPriority < (1UL << __NVIC_PRIO_BITS))   
   {
-    HAL_NVIC_SetPriority(SysTick_IRQn, TickPriority, 0U);
+    HAL_NVIC_SetPriority(SysTick_IRQn, TickPriority, 0U); //参数为-1,0x0F,0
     uwTickPrio = TickPriority;
   }
   else
@@ -141,8 +141,8 @@ __weak HAL_StatusTypeDef HAL_InitTick(uint32_t TickPriority)
   /* Configure the SysTick IRQ priority */
   if (TickPriority < (1UL << __NVIC_PRIO_BITS))   
   {
-    HAL_NVIC_SetPriority(SysTick_IRQn, TickPriority, 0U);  //参数为-1,
-    uwTickPrio = TickPriority;
+    HAL_NVIC_SetPriority(SysTick_IRQn, TickPriority, 0U);  //参数为-1,0x0F,0
+    uwTickPrio = TickPriority;  //把时钟优先级传给uwTickPrio
   }
   else
   {
@@ -154,7 +154,7 @@ __weak HAL_StatusTypeDef HAL_InitTick(uint32_t TickPriority)
 }
 
 第二个if判断 0x0000000F<(1<<4)即F<16成立，进入if
-void HAL_NVIC_SetPriority(IRQn_Type IRQn, uint32_t PreemptPriority, uint32_t SubPriority)
+void HAL_NVIC_SetPriority(IRQn_Type IRQn, uint32_t PreemptPriority, uint32_t SubPriority)  //参数为-1,0x0F,0
 { 
   uint32_t prioritygroup = 0x00U;
   
@@ -162,10 +162,36 @@ void HAL_NVIC_SetPriority(IRQn_Type IRQn, uint32_t PreemptPriority, uint32_t Sub
   assert_param(IS_NVIC_SUB_PRIORITY(SubPriority));
   assert_param(IS_NVIC_PREEMPTION_PRIORITY(PreemptPriority));
   
-  prioritygroup = NVIC_GetPriorityGrouping();
+  prioritygroup = NVIC_GetPriorityGrouping();  //结果为0x00000003
   
-  NVIC_SetPriority(IRQn, NVIC_EncodePriority(prioritygroup, PreemptPriority, SubPriority));
+  NVIC_SetPriority(IRQn, NVIC_EncodePriority(prioritygroup, PreemptPriority, SubPriority));  //参数为-1,15,设置中断时钟优先级为15
 }
+
+__STATIC_INLINE uint32_t __NVIC_GetPriorityGrouping(void)
+{
+  return ((uint32_t)((SCB->AIRCR & SCB_AIRCR_PRIGROUP_Msk) >> SCB_AIRCR_PRIGROUP_Pos));  // (0x05FA0300 (应该是FA050300?) & 0x00000700) >> 8 = 0x00000300 >> 8 = 0x00000003
+}
+
+__STATIC_INLINE uint32_t NVIC_EncodePriority (uint32_t PriorityGroup, uint32_t PreemptPriority, uint32_t SubPriority)  //参数为3,F,0
+{
+  uint32_t PriorityGroupTmp = (PriorityGroup & (uint32_t)0x07UL);   /* only values 0..7 are used      3&7=3    */
+  uint32_t PreemptPriorityBits;
+  uint32_t SubPriorityBits;
+
+  PreemptPriorityBits = ((7UL - PriorityGroupTmp) > (uint32_t)(__NVIC_PRIO_BITS)) ? (uint32_t)(__NVIC_PRIO_BITS) : (uint32_t)(7UL - PriorityGroupTmp);  //4>4?4:4 若判断4是否大于4，若为真，则为第一个结果；为假，则为第二个结果。
+  SubPriorityBits     = ((PriorityGroupTmp + (uint32_t)(__NVIC_PRIO_BITS)) < (uint32_t)7UL) ? (uint32_t)0UL : (uint32_t)((PriorityGroupTmp - 7UL) + (uint32_t)(__NVIC_PRIO_BITS));  //7<7?0:0 为假，则为0.
+
+  return (
+           ((PreemptPriority & (uint32_t)((1UL << (PreemptPriorityBits)) - 1UL)) << SubPriorityBits) |  //F & （16-1） = F  F << 0 = F F | 0 = F
+           ((SubPriority     & (uint32_t)((1UL << (SubPriorityBits    )) - 1UL)))
+         );
+}
+NVIC_EncodePriority函数返回15,设置系统定时中断优先级为15
+之后uwTickPrio = TickPriority; 把时钟优先级传给uwTickPrio
+HAL_MspInit函数的函数体内容是根据用户需求来动态修改的，会根据任务的不同拥有不同的函数体，当然你也可以添加你自己的需求代码。但要注意这个函数调用的时机是在main函数的最开始，由HAL_Init来调用的。不需要手动调用。之后你会看到好多类似的Init函数都不用自己来调用。
+
+sys_stm32_clock_init(RCC_PLL_MUL9); /* 设置时钟, 72Mhz */
+
 
 
 
